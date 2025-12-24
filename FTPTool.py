@@ -53,13 +53,10 @@ class FTPService(QThread):
             authorizer.add_user(
                 self.username, self.password, self.directory, perm="elradfmw"
             )
-            
-            handler = FTPHandler
-            handler.authorizer = authorizer
-            handler.encoding = "utf-8"
-            
-            # Custom handler to fix log signature and pipe logs to GUI
-            class CustomFTPHandler(handler):
+            # Windows 资源管理器默认使用 GBK 编码，设置为 utf-8 会导致中文乱码
+            class CustomFTPHandler(FTPHandler):
+                encoding = "gbk" 
+                
                 def log(self, message, logfun=None): 
                     is_error = "error" in message.lower() or "unhandled exception" in message.lower()
                     self.parent_service._log(f"[FTP] {message}", is_error)
@@ -68,8 +65,9 @@ class FTPService(QThread):
                     else:
                         super().log(message) 
 
+            CustomFTPHandler.authorizer = authorizer
             CustomFTPHandler.parent_service = self
-            
+
             address = (self.local_ip, self.port)
             self.ftp_server = FTPServer(address, CustomFTPHandler)
             self.ftp_server.max_cons = 256
@@ -97,7 +95,7 @@ class FTPService(QThread):
 class FTPManagerWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("🚀 LAN FTP Tool (Configuration Saved)")
+        self.setWindowTitle("🚀 LAN FTP Tool by Trigger")
         self.setGeometry(100, 100, 700, 500)
         self.ftp_service_instance = None
         
@@ -142,10 +140,9 @@ class FTPManagerWindow(QMainWindow):
 
     def apply_styles(self):
         """Applies QSS styles and sets Cascadia Code font"""
-        # Set Cascadia Code font globally
         self.setStyleSheet("""
             * {
-                font-family: "Cascadia Code", monospace;
+                font-family: "Cascadia Code", "Microsoft YaHei", monospace;
             }
             QMainWindow { background-color: #f0f0f0; }
             QPushButton { 
@@ -231,7 +228,6 @@ class FTPManagerWindow(QMainWindow):
         """Slot function: Receives and displays log information"""
         timestamp = QTime.currentTime().toString("hh:mm:ss")
         if is_error:
-             # Use HTML for red error text in QTextEdit
              self.log_text_edit.append(f"<span style='color:red;'>[{timestamp}] {message}</span>")
         else:
             self.log_text_edit.append(f"[{timestamp}] {message}")
@@ -250,7 +246,8 @@ class FTPManagerWindow(QMainWindow):
         password = self.pass_lineedit.text()
         
         # 1. Input Validation and Path Standardization
-        share_path = os.path.abspath(share_path)
+        # 使用 normpath 确保 Windows 路径格式正确
+        share_path = os.path.normpath(os.path.abspath(share_path))
         self.dir_lineedit.setText(share_path)
 
         if not os.path.isdir(share_path):
@@ -271,7 +268,6 @@ class FTPManagerWindow(QMainWindow):
             self.ftp_service_instance = FTPService(
                 directory=share_path, username=username, password=password, port=port
             )
-            # Connect the service thread's signal to the GUI slot
             self.ftp_service_instance.log_signal.connect(self.update_log)
             self.ftp_service_instance.start()
             
@@ -304,15 +300,11 @@ class FTPManagerWindow(QMainWindow):
 
     def closeEvent(self, event):
         """Overrides window close event to ensure service shutdown and config save"""
-        
-        # Save config before exiting
         self.save_config()
-        
         if self.ftp_service_instance:
             reply = QMessageBox.question(self, 'Confirmation', 
                 "FTP service is running. Are you sure you want to close and stop the service?", 
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-            
             if reply == QMessageBox.Yes:
                 self.stop_server()
                 event.accept()
